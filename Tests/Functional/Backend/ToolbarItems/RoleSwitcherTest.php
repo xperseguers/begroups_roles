@@ -28,6 +28,8 @@ namespace IchHabRecht\BegroupsRoles\Tests\Functional\Backend\ToolbarItems;
 use IchHabRecht\BegroupsRoles\Backend\ToolbarItems\RoleSwitcher;
 use Nimut\TestingFramework\TestCase\FunctionalTestCase;
 use TYPO3\CMS\Core\Core\Bootstrap;
+use TYPO3\CMS\Core\Database\ConnectionPool;
+use TYPO3\CMS\Core\Utility\GeneralUtility;
 
 class RoleSwitcherTest extends FunctionalTestCase
 {
@@ -72,7 +74,17 @@ class RoleSwitcherTest extends FunctionalTestCase
     public function checkAccessReturnsFalseWhenBeUsersFlagSetWithoutRoles()
     {
         $this->setUpBackendUserFromFixture(3);
-        $this->getDatabaseConnection()->updateArray('be_groups', ['pid' => 0], ['tx_begroupsroles_isrole' => 0]);
+        GeneralUtility::makeInstance(ConnectionPool::class)
+            ->getConnectionForTable('be_groups')
+            ->update(
+                'be_groups',
+                [
+                    'tx_begroupsroles_isrole' => 0,
+                ],
+                [
+                    'pid' => 0,
+                ]
+            );
 
         $this->assertFalse($this->roleSwitcher->checkAccess());
     }

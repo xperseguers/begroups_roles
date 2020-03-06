@@ -28,9 +28,8 @@ namespace IchHabRecht\BegroupsRoles\Backend\ToolbarItems;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use TYPO3\CMS\Backend\Toolbar\ToolbarItemInterface;
-use TYPO3\CMS\Backend\Utility\BackendUtility;
 use TYPO3\CMS\Core\Authentication\BackendUserAuthentication;
-use TYPO3\CMS\Core\Database\DatabaseConnection;
+use TYPO3\CMS\Core\Database\ConnectionPool;
 use TYPO3\CMS\Core\Imaging\Icon;
 use TYPO3\CMS\Core\Imaging\IconFactory;
 use TYPO3\CMS\Core\Page\PageRenderer;
@@ -68,16 +67,24 @@ class RoleSwitcher implements ToolbarItemInterface
 
         $this->role = (int)$backendUser->getSessionData('tx_begroupsroles_role');
 
-        $this->groups = $this->getDatabaseConnection()->exec_SELECTgetRows(
-            'uid, title',
-            $backendUser->usergroup_table,
-            'uid IN (' . $backendUser->user['tx_begroupsroles_groups'] . ')'
-            . ' AND tx_begroupsroles_isrole=1' . BackendUtility::deleteClause($backendUser->usergroup_table),
-            '',
-            'title ASC',
-            '',
-            'uid'
-        );
+        $this->groups = [];
+        if (!empty($backendUser->user['tx_begroupsroles_groups'])) {
+            $queryBuilder = GeneralUtility::makeInstance(ConnectionPool::class)
+                ->getQueryBuilderForTable($backendUser->usergroup_table);
+            $rows = $queryBuilder
+                ->select('uid', 'title')
+                ->from($backendUser->usergroup_table)
+                ->where(
+                    $queryBuilder->expr()->in('uid', GeneralUtility::intExplode(',', $backendUser->user['tx_begroupsroles_groups'])),
+                    $queryBuilder->expr()->eq('tx_begroupsroles_isrole', 1)
+                )
+                ->orderBy('title', 'ASC')
+                ->execute()
+                ->fetchAll();
+            foreach ($rows as $row) {
+                $this->groups[$row['uid']] = $row;
+            }
+        }
 
         return !empty($this->groups);
     }
@@ -194,14 +201,6 @@ class RoleSwitcher implements ToolbarItemInterface
     protected function getBackendUser()
     {
         return $GLOBALS['BE_USER'];
-    }
-
-    /**
-     * @return DatabaseConnection
-     */
-    protected function getDatabaseConnection()
-    {
-        return $GLOBALS['TYPO3_DB'];
     }
 
     /**

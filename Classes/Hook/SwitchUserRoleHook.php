@@ -25,9 +25,8 @@ namespace IchHabRecht\BegroupsRoles\Hook;
  *  This copyright notice MUST APPEAR in all copies of the script!
  ***************************************************************/
 
-use TYPO3\CMS\Backend\Utility\BackendUtility;
 use TYPO3\CMS\Core\Authentication\BackendUserAuthentication;
-use TYPO3\CMS\Core\Database\DatabaseConnection;
+use TYPO3\CMS\Core\Database\ConnectionPool;
 use TYPO3\CMS\Core\Type\Bitmask\Permission;
 use TYPO3\CMS\Core\Utility\GeneralUtility;
 
@@ -51,26 +50,34 @@ class SwitchUserRoleHook
         if ($role === null) {
             $role = 0;
             $backendUser->user['tx_begroupsroles_groups'] = implode(',', $this->getUsergroups($backendUser->user[$backendUser->usergroup_column]));
-            $this->getDatabaseConnection()->exec_UPDATEquery(
-                $backendUser->user_table,
-                'uid=' . $backendUser->user['uid'],
-                [
-                    'tx_begroupsroles_groups' => $backendUser->user['tx_begroupsroles_groups'],
-                ]
-            );
+            GeneralUtility::makeInstance(ConnectionPool::class)
+                ->getConnectionForTable($backendUser->user_table)
+                ->update(
+                    $backendUser->user_table,
+                    [
+                        'tx_begroupsroles_groups' => $backendUser->user['tx_begroupsroles_groups'],
+                    ],
+                    [
+                        'uid' => $backendUser->user['uid'],
+                    ]
+                );
         }
         if (empty($role) && !empty($backendUser->user['tx_begroupsroles_limit'])) {
-            $databaseConnection = $this->getDatabaseConnection();
-            $possibleUsergroups = $databaseConnection->cleanIntList($backendUser->user['tx_begroupsroles_groups']);
-            $group = $databaseConnection->exec_SELECTgetSingleRow(
-                'uid',
-                $backendUser->usergroup_table,
-                'uid IN (' . $possibleUsergroups . ') AND tx_begroupsroles_isrole=1'
-                . BackendUtility::deleteClause($backendUser->usergroup_table),
-                '',
-                'FIND_IN_SET(uid, ' . $databaseConnection->fullQuoteStr($possibleUsergroups, $backendUser->usergroup_table) . ')'
-            );
-            $role = !empty($group['uid']) ? (int)$group['uid'] : 0;
+            $queryBuilder = GeneralUtility::makeInstance(ConnectionPool::class)
+                ->getQueryBuilderForTable($backendUser->usergroup_table);
+            $group = $queryBuilder
+                ->select('uid')
+                ->from($backendUser->usergroup_table)
+                ->where(
+                    $queryBuilder->expr()->in('uid', GeneralUtility::intExplode(',', $backendUser->user['tx_begroupsroles_groups']))
+                )
+                ->getConcreteQueryBuilder()->addOrderBy(
+                    'FIND_IN_SET(' . $queryBuilder->quoteIdentifier('uid') . ', ' . $queryBuilder->quote($backendUser->user['tx_begroupsroles_groups']) . ')'
+                )
+                ->setMaxResults(1)
+                ->execute()
+                ->fetch();
+            $role = !empty($group) ? $group['uid'] : 0;
         }
         if (!empty($role) && GeneralUtility::inList($backendUser->user['tx_begroupsroles_groups'], $role)) {
             $backendUser->user[$backendUser->usergroup_column] = $role;
@@ -92,18 +99,26 @@ class SwitchUserRoleHook
     protected function getUsergroups($groupList, $processedUsergroups = [])
     {
         $backendUser = $this->getBackendUser();
-        $databaseConnection = $this->getDatabaseConnection();
         $groupList = GeneralUtility::intExplode(',', $groupList, true);
-        $result = $databaseConnection->exec_SELECTquery(
-            'uid, subgroup',
-            $backendUser->usergroup_table,
-            'deleted=0 AND hidden=0 AND pid=0 AND uid IN (' . implode(',', $groupList) . ')'
-            . ' AND (lockToDomain=\'\' OR lockToDomain IS NULL OR lockToDomain='
-            . $databaseConnection->fullQuoteStr(GeneralUtility::getIndpEnv('HTTP_HOST'), $backendUser->usergroup_table)
-            . ')'
-        );
+
+        $queryBuilder = GeneralUtility::makeInstance(ConnectionPool::class)
+            ->getQueryBuilderForTable($backendUser->usergroup_table);
+        $statement = $queryBuilder
+            ->select('uid', 'subgroup')
+            ->from($backendUser->usergroup_table)
+            ->where(
+                $queryBuilder->expr()->eq('pid', 0),
+                $queryBuilder->expr()->in('uid', $groupList),
+                $queryBuilder->expr()->orX(
+                    $queryBuilder->expr()->eq('lockToDomain', $queryBuilder->quote('')),
+                    $queryBuilder->expr()->isNull('lockToDomain'),
+                    $queryBuilder->expr()->eq('lockToDomain', $queryBuilder->createNamedParameter(GeneralUtility::getIndpEnv('HTTP_HOST'), \PDO::PARAM_STR))
+                )
+            )
+            ->execute();
+
         $usergroups = [];
-        while ($row = $result->fetch_assoc()) {
+        while (($row = $statement->fetch()) !== false) {
             if (!isset($processedUsergroups[$row['uid']])) {
                 $processedUsergroups[$row['uid']] = $row['uid'];
                 $usergroups[$row['uid']] = $row['uid'];
@@ -120,7 +135,6 @@ class SwitchUserRoleHook
                 }
             }
         }
-        $databaseConnection->sql_free_result($result);
 
         return $usergroups;
     }
@@ -131,13 +145,5 @@ class SwitchUserRoleHook
     protected function getBackendUser()
     {
         return $GLOBALS['BE_USER'];
-    }
-
-    /**
-     * @return DatabaseConnection
-     */
-    protected function getDatabaseConnection()
-    {
-        return $GLOBALS['TYPO3_DB'];
     }
 }
