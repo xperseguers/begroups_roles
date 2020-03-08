@@ -35,6 +35,8 @@ use TYPO3\CMS\Core\Utility\GeneralUtility;
  */
 class SwitchUserRoleHook
 {
+    const SIGNAL_PreSwitchUserRole = 'preSwitchUserRole';
+
     /**
      * Assign user group from session data
      */
@@ -80,7 +82,18 @@ class SwitchUserRoleHook
             $role = !empty($group) ? $group['uid'] : 0;
         }
         if (!empty($role) && GeneralUtility::inList($backendUser->user['tx_begroupsroles_groups'], $role)) {
+            $backupRole = $role;
+            $signalSlotDispatcher = GeneralUtility::makeInstance(\TYPO3\CMS\Extbase\SignalSlot\Dispatcher::class);
+            $signalSlotDispatcher->dispatch(
+                __CLASS__,
+                static::SIGNAL_PreSwitchUserRole,
+                [
+                    'backendUser' => $backendUser,
+                    'role' => &$role,
+                ]
+            );
             $backendUser->user[$backendUser->usergroup_column] = $role;
+            $role = $backupRole;
             if (!empty($backendUser->user['admin'])) {
                 $backendUser->user['options'] |= Permission::PAGE_SHOW | Permission::PAGE_EDIT;
                 $backendUser->user['admin'] = 0;
@@ -92,11 +105,11 @@ class SwitchUserRoleHook
     }
 
     /**
-     * @param int $groupList
+     * @param string $groupList
      * @param array $processedUsergroups
      * @return array
      */
-    protected function getUsergroups($groupList, $processedUsergroups = [])
+    protected function getUsergroups($groupList, array $processedUsergroups = [])
     {
         $backendUser = $this->getBackendUser();
         $groupList = GeneralUtility::intExplode(',', $groupList, true);

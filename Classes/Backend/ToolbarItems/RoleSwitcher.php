@@ -41,6 +41,8 @@ use TYPO3\CMS\Lang\LanguageService;
  */
 class RoleSwitcher implements ToolbarItemInterface
 {
+    const SIGNAL_PostPopulateGroups = 'postPopulateGroups';
+
     /**
      * @var array
      */
@@ -85,6 +87,16 @@ class RoleSwitcher implements ToolbarItemInterface
                 $this->groups[$row['uid']] = $row;
             }
         }
+
+        $signalSlotDispatcher = GeneralUtility::makeInstance(\TYPO3\CMS\Extbase\SignalSlot\Dispatcher::class);
+        $signalSlotDispatcher->dispatch(
+            __CLASS__,
+            static::SIGNAL_PostPopulateGroups,
+            [
+                'backendUser' => $backendUser,
+                'groups' => &$this->groups,
+            ]
+        );
 
         return !empty($this->groups);
     }
@@ -186,7 +198,7 @@ class RoleSwitcher implements ToolbarItemInterface
         $backendUser = $this->getBackendUser();
 
         $newRole = (int)GeneralUtility::_POST('role');
-        if ($newRole <= 0 || !GeneralUtility::inList($backendUser->user['tx_begroupsroles_groups'], $newRole)) {
+        if (!GeneralUtility::inList($backendUser->user['tx_begroupsroles_groups'], $newRole)) {
             $newRole = 0;
         }
 
