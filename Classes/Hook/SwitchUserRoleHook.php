@@ -98,11 +98,12 @@ class SwitchUserRoleHook
                         $queryBuilder->createNamedParameter(1, \PDO::PARAM_INT)
                     )
                 )
+                ->orderBy('title')
                 ->execute()
                 ->fetchAll();
 
             $rows = array_combine(array_map('intval', array_column($rows, 'uid')), $rows);
-            $orderedUsergroups = array_values(array_keys(array_intersect_key(array_flip($possibleUsergroups), $rows)));
+            $orderedUsergroups = array_keys(array_intersect_key($rows, array_flip($possibleUsergroups)));
 
             $role = !empty($orderedUsergroups[0]) ? $orderedUsergroups[0] : 0;
         }
